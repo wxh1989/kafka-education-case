@@ -1,0 +1,22 @@
+server:
+  port: 8888
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    username: cqpt
+    password: 123
+    url: jdbc:postgresql://192.168.0.99:5432/cqpt_database
+
+#mybatis-plus 配置
+mybatis-plus:
+  #mybatis Mapper 文件路径位置
+  mapper-locations: classpath:/mapper/**.xml
+  configuration:
+    #输出执行SQL日志
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      #逻辑删除配置
+      logic-delete-value: true
+      logic-not-delete-value: false
+
