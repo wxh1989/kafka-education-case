@@ -2,14 +2,16 @@ package com.example.kafka;
 
 import com.example.kafka.dao.Student;
 import com.example.kafka.mapper.AsPersonMapper;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.*;
-import org.apache.kafka.clients.consumer.CommitFailedException;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.zookeeper.Login;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +29,7 @@ import java.util.concurrent.ExecutionException;
  * enable.auto.commit 此参数控制是否 自动提交，
  * auto.commit.interval 此参数用于自动提交 ,多少时间提交一次偏移量
  */
+@Slf4j
 @RunWith(SpringJUnit4ClassRunner.class)
 @SpringBootTest
 public class KafkaOffsetTest {
@@ -98,6 +101,7 @@ public class KafkaOffsetTest {
         Properties props = new Properties();
         props.put("bootstrap.servers", "192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
         props.put("group.id", "offset-group");
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"");
         props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
         props.put("value.deserializer", StringDeserializer.class.getName());
         //关闭自动提交偏移量
@@ -150,10 +154,101 @@ public class KafkaOffsetTest {
     }
 
 
+    /**
+     * 从指定位置开始消费
+     * seek assign 和  subscribe 冲突
+     */
+    @Test
+    public  void seekTest(){
+
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
+        props.put("group.id", "offset-group");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", StringDeserializer.class.getName());
+        //关闭自动提交偏移量
+        props.put("enable.auto.commit",false);
+
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(props);
+        consumer.subscribe(Collections.singletonList("repeat-topic"));
+        //从 0 号分区的 的 offset = 0 的位置开始消费
+        //repeat-topic-1
+        TopicPartition partition =  new TopicPartition("repeat-topic",0);
+        //从指定分区的offset 开始读取数据
+        consumer.assign(Arrays.asList(  partition));
+        consumer.seek(partition,0);
+        while (true){
+            ConsumerRecords<String, String> records = consumer.poll(100);
+            for(ConsumerRecord<String, String> consumerRecord: records){
+                log.info("从分区获取数据"+consumerRecord.toString());
+            }
+            try {
+                consumer.commitSync();
+            }catch (CommitFailedException exception){
+                System.out.println(exception.getMessage());
+            }
+        }
+
+    }
+
 
     /**
-     * 模拟消息丢失场景
+     * offsetsForTimes  按时间戳查找给定分区的偏移量
+     * 从固定时间点开始消费
      */
+    public void seekByTimePointTest(){
+
+        String topicName = "repeat-topic";
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
+        props.put("group.id", "offset-group");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", StringDeserializer.class.getName());
+        //关闭自动提交偏移量
+        props.put("enable.auto.commit",false);
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(props);
+
+
+        //从一小时前开始消费
+        long fetchTime = new Date().getTime() - (1000 * 60 * 60);
+        //获取所属主题的分区列表
+        List<PartitionInfo> topicPartitionList = consumer.partitionsFor(topicName);
+
+        Map<TopicPartition,Long>  partitionMap = new HashMap<>();
+        topicPartitionList.forEach(partitionInfo -> {
+            //key:分区信息 ,value: 时间戳
+            partitionMap.put(new TopicPartition(topicName,partitionInfo.partition()),fetchTime);
+        });
+
+        //按时间戳查找给定分区的偏移量
+        Map<TopicPartition, OffsetAndTimestamp> timestampMap = consumer.offsetsForTimes(partitionMap);
+        //开始消费
+        for(Map.Entry<TopicPartition,OffsetAndTimestamp> entry : timestampMap.entrySet()){
+
+            TopicPartition key = entry.getKey();
+            OffsetAndTimestamp value = entry.getValue();
+            if(value == null || key == null){
+                continue;
+            }
+            //拿到偏移量
+            long offset = value.offset();
+            consumer.assign(Arrays.asList(key));
+            consumer.seek(key,offset);
+        }
+        //开始消费
+        ConsumerRecords<String, String> records = consumer.poll(0);
+
+        while (true){
+            for(ConsumerRecord<String, String> consumerRecord: records){
+                log.info("从分区获取数据"+consumerRecord.toString());
+            }
+            try {
+                consumer.commitSync();
+            }catch (CommitFailedException exception){
+                System.out.println(exception.getMessage());
+            }
+        }
+    }
 
 
 
