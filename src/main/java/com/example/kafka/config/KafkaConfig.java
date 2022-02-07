@@ -9,6 +9,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.*;
 import org.apache.kafka.common.acl.AclBinding;
 import org.apache.kafka.common.acl.AclBindingFilter;
@@ -30,7 +31,7 @@ public class KafkaConfig {
     public Producer createKafkaProducer(){
         Producer producer = null;
         Properties kafkaProperties = new Properties();
-        kafkaProperties.put("key.serializer","org.apache.kafka.common.serialization.StringSerializer");
+        kafkaProperties.put( ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,"org.apache.kafka.common.serialization.StringSerializer");
         kafkaProperties.put("value.serializer","org.apache.kafka.common.serialization.StringSerializer");
         kafkaProperties.put("bootstrap.servers","192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
 
