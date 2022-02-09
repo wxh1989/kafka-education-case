@@ -37,7 +37,6 @@ public class KafkaAvroTest {
 
         Properties kafkaProperties = new Properties();
         kafkaProperties.put("key.serializer","org.apache.kafka.common.serialization.StringSerializer");
-        System.out.println(KafkaAvroSerializer.class.getName());
         kafkaProperties.put("value.serializer",KafkaAvroSerializer.class.getName());
         kafkaProperties.put("bootstrap.servers","192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
         kafkaProperties.put("schema.registry.url","http://192.168.0.99:8888");

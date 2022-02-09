@@ -63,7 +63,7 @@ public class KafkaRepeatOffset {
      */
     public void createRepeatTopic(){
         //创建分区 4个分区 4个副本
-        NewTopic newTopic = new NewTopic(TOPIC_NAME,2, (short) 1);
+        NewTopic newTopic = new NewTopic(TOPIC_NAME,2, (short) 3);
         List<NewTopic> topics = new ArrayList<>();
         topics.add(newTopic);
         CreateTopicsResult createTopicsResult = adminClient.createTopics(topics);
