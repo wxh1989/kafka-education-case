@@ -664,7 +664,7 @@ ls /brokers/ids
 - --partitions 1 给topic创建一个分区
 - --replication-factor 1 给topic创建一个副本
 - --bootstrap-server 192.168.0.99:9092 指定使用哪个broker 创建topic
-    - 测试中如果在server.properties 中配置了 listeners 就不能使用localhost 必须用 指定的ip地址访问
+  - 测试中如果在server.properties 中配置了 listeners 就不能使用localhost 必须用 指定的ip地址访问
 - --topic 主题的名字
 ```shell
 ./kafka-topics.sh --create --partitions 1 \
@@ -679,15 +679,277 @@ ls /brokers/ids
 # Kafka java客户端调用
 [https://github.com/wxh1989/kafka-education-case](https://github.com/wxh1989/kafka-education-case) 完整的案例
 ## 生产者
-同步消息
-异步消息
-异步消息回调处理
+### ​
+
+### 异步异步发送
+直接调用send方法，就是异步发送，无需等待消息发送成功。此种形式速度快
+```java
+    public void sendMessage(){
+        ProducerRecord<String,String> record = new ProducerRecord<>("SpringClient","CreateMessage","wxh");
+        producer.send(record);
+    }
+```
+### 异步消息回调处理
+
+- 异步消息什么时候发送成功，自动进入回调函数处理业务逻辑。
+- 回调实现 Callback 接口，返回生产者元数据信息
+```java
+    /**
+     * 异步消息
+     */
+    @Test
+    public void sendNoSynchroMessage(){
+
+        ProducerRecord<String,String> record = new ProducerRecord<String,String>("SynchroMessage","CreateMessage","这是一要异步消息");
+        // 第二个参数创建 一个回调函数，返回值会自动 在回调函数内体现
+        producer.send(record,new ProducerCallback());
+    }
+```
+```java
+package com.example.kafka.callback;
+
+import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.RecordMetadata;
+
+public class ProducerCallback implements Callback {
+    @Override
+    public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+        if(e != null){
+            e.printStackTrace();
+        }else {
+            System.out.println("异步消息返回的主题信息"+ recordMetadata.topic());
+        }
+    }
+}
+
+```
+### 同步发送
+调用send().get()方法等待返回值。
+```java
+    /**
+     * 同步发送消息
+     * 消息发送到 kafka broker 上等到有返回值才能继续操作
+     */
+    @Test
+    public void sendSynchroMessage(){
+        ProducerRecord<String,String> record = new ProducerRecord<>("SynchroMessage","CreateMessage","这是一条同步消息");
+        try {
+            System.out.println(producer.send(record).get());
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+```
+## 消费者
 ​
 
-## 消费者
+### 指定分区消费
+调用consumer.assign()方法指定消费者消费的分区
+```java
+    /**
+     * 从指定位置开始消费
+     * seek assign 和  subscribe 冲突
+     */
+    @Test
+    public  void seekTest(){
+
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
+        props.put("group.id", "offset-group");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", StringDeserializer.class.getName());
+        //关闭自动提交偏移量
+        props.put("enable.auto.commit",false);
+
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(props);
+        consumer.subscribe(Collections.singletonList("repeat-topic"));
+        //从 0 号分区的 的 offset = 0 的位置开始消费
+        //repeat-topic-1
+        TopicPartition partition =  new TopicPartition("repeat-topic",0);
+        //从指定分区的offset 开始读取数据
+        consumer.assign(Arrays.asList(  partition));
+        consumer.seek(partition,0);
+        while (true){
+            ConsumerRecords<String, String> records = consumer.poll(100);
+            for(ConsumerRecord<String, String> consumerRecord: records){
+                log.info("从分区获取数据"+consumerRecord.toString());
+            }
+            try {
+                consumer.commitSync();
+            }catch (CommitFailedException exception){
+                System.out.println(exception.getMessage());
+            }
+        }
+
+    }
+```
+### 指定offset消费
+
+- 调用seek方法 ，此方法有2个参数，参数1：分区，参数2：偏移量/offset的元数据
+- 调用seek就不能调用poll否则报错
+```java
+TopicPartition partition =  new TopicPartition("repeat-topic",0); 
+consumer.seek(partition,0);
+```
+​
+
+### 指定时间消费/回溯消费
+调用 offsetsForTimes 方法指定时间消费
+参数是一个Map ，map中要存入分区信息，及时间戳
+```java
+    /**
+     * offsetsForTimes  按时间戳查找给定分区的偏移量
+     * 从固定时间点开始消费
+     */
+    public void seekByTimePointTest(){
+
+        String topicName = "repeat-topic";
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094");
+        props.put("group.id", "offset-group");
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", StringDeserializer.class.getName());
+        //关闭自动提交偏移量
+        props.put("enable.auto.commit",false);
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(props);
+
+
+        //从一小时前开始消费
+        long fetchTime = new Date().getTime() - (1000 * 60 * 60);
+        //获取所属主题的分区列表
+        List<PartitionInfo> topicPartitionList = consumer.partitionsFor(topicName);
+
+        Map<TopicPartition,Long>  partitionMap = new HashMap<>();
+        topicPartitionList.forEach(partitionInfo -> {
+            //key:分区信息 ,value: 时间戳
+            partitionMap.put(new TopicPartition(topicName,partitionInfo.partition()),fetchTime);
+        });
+
+        //按时间戳查找给定分区的偏移量
+        Map<TopicPartition, OffsetAndTimestamp> timestampMap = consumer.offsetsForTimes(partitionMap);
+        //开始消费
+        for(Map.Entry<TopicPartition,OffsetAndTimestamp> entry : timestampMap.entrySet()){
+
+            TopicPartition key = entry.getKey();
+            OffsetAndTimestamp value = entry.getValue();
+            if(value == null || key == null){
+                continue;
+            }
+            //拿到偏移量
+            long offset = value.offset();
+            consumer.assign(Arrays.asList(key));
+            consumer.seek(key,offset);
+        }
+        //开始消费
+        ConsumerRecords<String, String> records = consumer.poll(0);
+
+        while (true){
+            for(ConsumerRecord<String, String> consumerRecord: records){
+                log.info("从分区获取数据"+consumerRecord.toString());
+            }
+            try {
+                consumer.commitSync();
+            }catch (CommitFailedException exception){
+                System.out.println(exception.getMessage());
+            }
+        }
+    }
+```
 # Spring Kafka 使用
+#### 1、引入JAR包
+```xml
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+```
+#### 2、配置propertirs文件
+```cypher
+server:
+  port: 9997
+spring:
+  application:
+    name: kafka-spring-client
+  kafka:
+    #kafka 集群地址
+    bootstrap-servers: 192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094
+    #生产者配置 ，和Java客户端参数一致
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      retries: 3
+    #消费者配置
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: group-kafka-spring
+      enable-auto-commit: false
+      #每次抓500条
+      max-poll-records: 500
+    listener:
+      ack-mode: manual
+
+    
+
+```
+#### 3、生产者调用KafkaTemplater
+调用send发送消息到kafka ,send参数如下图
+![image.png](https://cdn.nlark.com/yuque/0/2022/png/789898/1646365069155-e9fca625-d91e-4a59-a05e-39ac79a3cac8.png#clientId=u36d92f54-93e6-4&crop=0&crop=0&crop=1&crop=1&from=paste&height=261&id=u14c468c5&margin=%5Bobject%20Object%5D&name=image.png&originHeight=326&originWidth=1467&originalType=binary&ratio=1&rotation=0&showTitle=false&size=64399&status=done&style=none&taskId=u1c33862a-c282-4fe9-b515-88baad48fea&title=&width=1173.6)
+```java
+    private final String STRING_TOPIC = "kafka-spring-topic";
+
+    @Autowired
+    private KafkaTemplate<String,String> kafkaTemplate;
+
+    @RequestMapping(method = RequestMethod.POST,value = "/send")
+    public void sendMessage(@RequestParam(value = "message")String message){
+        kafkaTemplate.send(STRING_TOPIC,message);
+    }
+```
+#### 4、消费者监听消息
+使用@KafkaListener监听主题消息
+```java
+@Component
+public class SpringKafkaConsumer {
+
+    /**
+     * 处理单挑消息
+     * @param record
+     * @param ack
+     */
+    @KafkaListener(topics = "kafka-spring-topic",groupId = "group-kafka-spring")
+    private void listenerTopic(ConsumerRecord<String,String> record, Acknowledgment ack){
+        System.out.println(record.value());
+        System.out.println(record.toString());
+        ack.acknowledge();
+
+    }
+
+    /**
+     * 一批一批处理消息
+     * @param records
+     * @param ack
+     */
+    @KafkaListener(topics = "kafka-spring-topic",groupId = "group-kafka-spring")
+    private void listenerTopicBatch(ConsumerRecords<String,String> records, Acknowledgment ack){
+        records.forEach(record -> {
+           System.out.println(record.value()); 
+        });
+        ack.acknowledge();
+
+    }
+}
+```
 # Kafka 集群配置
 
+- 保证每个server.properties 中的 broker.id 不能重复
+- 配置客户端 bootstrap.servers 参数指定 集群所用的broker地址，已逗号分隔
+
+192.168.0.99:9092,192.168.0.99:9093,192.168.0.99:9094
+​
 
 # Kafka 各种异常的处理
 ## The Cluster ID g3hVoMp1TiKEjrOhmtJy5g doesn't match stored
